@@ -22,15 +22,10 @@ def get_data_dir() -> Path:
 
 
 def get_assets_dir() -> Path:
-    source_assets = Path(__file__).parent.parent / "assets"
-    if source_assets.exists():
-        return source_assets
-
     import sys
     if getattr(sys, 'frozen', False):
         return Path(sys._MEIPASS) / "assets"
-
-    return source_assets
+    return Path(__file__).parent.parent / "assets"
 
 
 def get_icon_path() -> Optional[Path]:

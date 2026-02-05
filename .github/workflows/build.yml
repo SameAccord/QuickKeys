@@ -1,0 +1,197 @@
+name: Build QuickKeys
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: '3.12'
+  APP_NAME: QuickKeys
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: QuickKeys-Windows
+            artifact_path: dist/QuickKeys.exe
+          - os: macos-latest
+            artifact_name: QuickKeys-macOS
+            artifact_path: dist/QuickKeys.app
+          - os: ubuntu-latest
+            artifact_name: QuickKeys-Linux
+            artifact_path: dist/QuickKeys
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.os }})
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      # ── Linux system dependencies ─────────────────────────────────────────
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-tk \
+            python3-dev \
+            libx11-dev \
+            libxext-dev \
+            libxrender-dev \
+            libxinerama-dev \
+            libxi-dev \
+            libxrandr-dev \
+            libxcursor-dev \
+            libxtst-dev \
+            libxkbcommon-dev \
+            xclip \
+            xdotool \
+            libgirepository1.0-dev \
+            gir1.2-ayatanaappindicator3-0.1 \
+            pkg-config \
+            libcairo2-dev
+
+      # ── macOS system dependencies ─────────────────────────────────────────
+      - name: Install macOS system dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew install python-tk@3.12 || true
+
+      # ── Python dependencies ───────────────────────────────────────────────
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      # ── Linux: pystray AppIndicator backend ───────────────────────────────
+      - name: Install pystray Linux backend
+        if: runner.os == 'Linux'
+        run: pip install pygobject
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      - name: Build with PyInstaller
+        run: pyinstaller quickkeys.spec --clean --noconfirm
+
+      # ── Verify build output ───────────────────────────────────────────────
+      - name: Verify build output (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path "dist/QuickKeys.exe") {
+            Write-Host "Build successful: QuickKeys.exe found"
+            Get-Item "dist/QuickKeys.exe" | Select-Object Name, Length
+          } else {
+            Write-Error "Build failed: QuickKeys.exe not found"
+            exit 1
+          }
+
+      - name: Verify build output (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          if [ -d "dist/QuickKeys.app" ]; then
+            echo "Build successful: QuickKeys.app found"
+            du -sh dist/QuickKeys.app
+          else
+            echo "Build failed: QuickKeys.app not found"
+            exit 1
+          fi
+
+      - name: Verify build output (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if [ -f "dist/QuickKeys" ]; then
+            echo "Build successful: QuickKeys found"
+            ls -lh dist/QuickKeys
+            file dist/QuickKeys
+          else
+            echo "Build failed: QuickKeys not found"
+            exit 1
+          fi
+
+      # ── Package macOS .app into .zip ──────────────────────────────────────
+      - name: Package macOS app
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          zip -r QuickKeys-macOS.zip QuickKeys.app
+
+      # ── Upload artifacts ──────────────────────────────────────────────────
+      - name: Upload build artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/QuickKeys.exe
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload build artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/QuickKeys-macOS.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload build artifact (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/QuickKeys
+          retention-days: 30
+          if-no-files-found: error
+
+  # ── Release job (only on tag push) ────────────────────────────────────────
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    name: Create Release
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          cp artifacts/QuickKeys-Windows/QuickKeys.exe release/QuickKeys-Windows.exe
+          cp artifacts/QuickKeys-macOS/QuickKeys-macOS.zip release/QuickKeys-macOS.zip
+          cp artifacts/QuickKeys-Linux/QuickKeys release/QuickKeys-Linux
+          chmod +x release/QuickKeys-Linux
+          ls -lh release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: |
+            release/QuickKeys-Windows.exe
+            release/QuickKeys-macOS.zip
+            release/QuickKeys-Linux
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
