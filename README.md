@@ -5,5 +5,7 @@ Security Notice: QuickKeys is provided as-is for personal use. While credentials
 
 # Encryption
 Master password — The master password itself is never stored. Instead, a cryptographic salt and verification hash derived from the password are stored within the encrypted file header. When you enter your password, the app uses Argon2 (a secure password hashing algorithm) to verify it matches.
+
 Keybind data — All your keybinds (including any usernames, passwords, custom text, program paths, etc.) are stored in keybinds.enc — an encrypted file using the cryptography library (Fernet symmetric encryption). The encryption key is derived from your master password.
+
 Security — Without the correct master password, the keybinds.enc file cannot be decrypted. The data is protected at rest.
