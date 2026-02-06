@@ -1,19 +1,91 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
-from typing import Callable, Optional
+from tkinter import messagebox
+from typing import Callable, Optional, List
+
+import customtkinter as ctk
 
 from ..storage import Keybind, KeybindStore
 from ..hotkeys import HotkeyManager
-from ..config import get_icon_path
+from . import theme
 
 
-def _set_window_icon(window):
-    icon_path = get_icon_path()
-    if icon_path:
-        try:
-            window.iconbitmap(str(icon_path))
-        except Exception:
-            pass
+class _KeybindCard(ctk.CTkFrame):
+
+    def __init__(self, master, keybind: Keybind, action_label: str,
+                 on_select: Callable, on_double_click: Callable, **kwargs):
+        super().__init__(
+            master,
+            fg_color=theme.SURFACE,
+            corner_radius=theme.CORNER_RADIUS,
+            height=56,
+            **kwargs,
+        )
+        self.keybind = keybind
+        self._on_select = on_select
+        self._on_double_click = on_double_click
+        self._selected = False
+
+        self.pack_propagate(False)
+
+        self.badge = ctk.CTkLabel(
+            self,
+            text=keybind.hotkey,
+            font=theme.FONT_BADGE,
+            text_color=theme.TEXT_PRIMARY,
+            fg_color=theme.ACCENT,
+            corner_radius=6,
+            width=0,
+            padx=10,
+            pady=2,
+        )
+        self.badge.pack(side="left", padx=(theme.PAD_SM, theme.PAD_SM))
+
+        text_frame = ctk.CTkFrame(self, fg_color="transparent")
+        text_frame.pack(side="left", fill="both", expand=True, pady=6)
+
+        self.name_label = ctk.CTkLabel(
+            text_frame,
+            text=keybind.name,
+            font=theme.FONT_BODY,
+            text_color=theme.TEXT_PRIMARY,
+            anchor="w",
+        )
+        self.name_label.pack(anchor="w")
+
+        self.type_label = ctk.CTkLabel(
+            text_frame,
+            text=action_label,
+            font=theme.FONT_TINY,
+            text_color=theme.TEXT_MUTED,
+            anchor="w",
+        )
+        self.type_label.pack(anchor="w")
+
+        for widget in (self, self.badge, text_frame, self.name_label, self.type_label):
+            widget.bind("<Button-1>", self._handle_click)
+            widget.bind("<Double-Button-1>", self._handle_dblclick)
+            widget.bind("<Enter>", self._on_enter)
+            widget.bind("<Leave>", self._on_leave)
+
+    def set_selected(self, selected: bool):
+        self._selected = selected
+        color = theme.SURFACE_SELECT if selected else theme.SURFACE
+        self.configure(fg_color=color)
+
+    def _on_enter(self, event):
+        if not self._selected:
+            self.configure(fg_color=theme.SURFACE_HOVER)
+
+    def _on_leave(self, event):
+        if not self._selected:
+            self.configure(fg_color=theme.SURFACE)
+
+    def _handle_click(self, event):
+        self._on_select(self)
+
+    def _handle_dblclick(self, event):
+        self._on_select(self)
+        self._on_double_click(self)
 
 
 class ConfigWindow:
@@ -21,29 +93,27 @@ class ConfigWindow:
     ACTION_TYPE_DISPLAY = {
         'paste': 'Paste',
         'launch': 'Launch',
-        'launch_paste': 'Launch + Paste'
-    }
-
-    COLUMN_HEADERS = {
-        'hotkey': 'Hotkey',
-        'name': 'Name',
-        'type': 'Action Type'
+        'launch_paste': 'Launch + Paste',
     }
 
     def __init__(
         self,
+        parent,
         store: KeybindStore,
         hotkey_manager: HotkeyManager,
-        on_keybinds_changed: Optional[Callable] = None
+        on_keybinds_changed: Optional[Callable] = None,
     ):
+        self.parent = parent
         self.store = store
         self.hotkey_manager = hotkey_manager
         self.on_keybinds_changed = on_keybinds_changed
-        self.root: Optional[tk.Toplevel] = None
-        self.tree: Optional[ttk.Treeview] = None
+        self.root: Optional[ctk.CTkToplevel] = None
 
         self._sort_column: Optional[str] = None
         self._sort_cycle: int = 0
+
+        self._cards: List[_KeybindCard] = []
+        self._selected_card: Optional[_KeybindCard] = None
 
     def show(self):
         if self.root is not None:
@@ -54,16 +124,17 @@ class ConfigWindow:
             except tk.TclError:
                 self.root = None
 
-        self.root = tk.Toplevel()
+        self.root = ctk.CTkToplevel(self.parent)
         self.root.title("QuickKeys - Configure Keybinds")
-        self.root.geometry("600x400")
-        self.root.minsize(500, 300)
+        self.root.geometry("600x460")
+        self.root.minsize(500, 360)
+        self.root.configure(fg_color=theme.BG_DARK)
 
-        _set_window_icon(self.root)
+        theme.set_window_icon(self.root)
 
         self.root.update_idletasks()
         x = (self.root.winfo_screenwidth() - 600) // 2
-        y = (self.root.winfo_screenheight() - 400) // 2
+        y = (self.root.winfo_screenheight() - 460) // 2
         self.root.geometry(f"+{x}+{y}")
 
         self._create_widgets()
@@ -72,96 +143,152 @@ class ConfigWindow:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _create_widgets(self):
-        main_frame = ttk.Frame(self.root, padding=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        main_frame = ctk.CTkFrame(self.root, fg_color=theme.BG_DARK)
+        main_frame.pack(fill="both", expand=True, padx=theme.PAD, pady=theme.PAD)
 
-        header = ttk.Label(
-            main_frame,
+        header_row = ctk.CTkFrame(main_frame, fg_color="transparent")
+        header_row.pack(fill="x", pady=(0, theme.PAD_SM))
+
+        ctk.CTkLabel(
+            header_row,
             text="Keybinds",
-            font=('Segoe UI', 14, 'bold')
+            font=theme.FONT_TITLE,
+            text_color=theme.TEXT_PRIMARY,
+        ).pack(side="left")
+
+        sort_frame = ctk.CTkFrame(header_row, fg_color="transparent")
+        sort_frame.pack(side="right")
+
+        ctk.CTkLabel(
+            sort_frame,
+            text="Sort:",
+            font=theme.FONT_SMALL,
+            text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left", padx=(0, 4))
+
+        self.sort_menu = ctk.CTkOptionMenu(
+            sort_frame,
+            values=["Created", "Hotkey", "Name", "Type"],
+            command=self._on_sort_changed,
+            width=110,
+            height=28,
+            font=theme.FONT_SMALL,
+            fg_color=theme.SURFACE,
+            button_color=theme.ACCENT,
+            button_hover_color=theme.ACCENT_HOVER,
+            dropdown_fg_color=theme.SURFACE,
+            dropdown_hover_color=theme.SURFACE_HOVER,
+            dropdown_text_color=theme.TEXT_PRIMARY,
+            text_color=theme.TEXT_PRIMARY,
+            corner_radius=theme.BUTTON_RADIUS,
         )
-        header.pack(anchor=tk.W, pady=(0, 10))
+        self.sort_menu.set("Created")
+        self.sort_menu.pack(side="left")
 
-        tree_frame = ttk.Frame(main_frame)
-        tree_frame.pack(fill=tk.BOTH, expand=True)
+        self.list_frame = ctk.CTkScrollableFrame(
+            main_frame,
+            fg_color=theme.BG_DARK,
+            corner_radius=theme.CORNER_RADIUS,
+            scrollbar_button_color=theme.SURFACE,
+            scrollbar_button_hover_color=theme.SURFACE_HOVER,
+        )
+        self.list_frame.pack(fill="both", expand=True)
 
-        scrollbar = ttk.Scrollbar(tree_frame)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        columns = ('hotkey', 'name', 'type')
-        self.tree = ttk.Treeview(
-            tree_frame,
-            columns=columns,
-            show='headings',
-            selectmode='browse',
-            yscrollcommand=scrollbar.set
+        self.empty_label = ctk.CTkLabel(
+            self.list_frame,
+            text="No keybinds configured.\nClick Add to create one.",
+            font=theme.FONT_BODY,
+            text_color=theme.TEXT_MUTED,
         )
 
-        for col in columns:
-            self.tree.heading(
-                col,
-                text=self.COLUMN_HEADERS[col],
-                command=lambda c=col: self._sort_by(c)
-            )
+        btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        btn_frame.pack(fill="x", pady=(theme.PAD, 0))
 
-        self.tree.column('hotkey', width=150, minwidth=100)
-        self.tree.column('name', width=200, minwidth=100)
-        self.tree.column('type', width=120, minwidth=80)
-
-        self.tree.pack(fill=tk.BOTH, expand=True)
-        scrollbar.config(command=self.tree.yview)
-
-        self.tree.bind('<Double-1>', self._on_double_click)
-
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill=tk.X, pady=(10, 0))
-
-        add_btn = ttk.Button(
-            button_frame,
-            text="Add",
-            command=self._on_add
+        add_btn = ctk.CTkButton(
+            btn_frame, text="Add",
+            command=self._on_add,
+            **theme.accent_button_kwargs(),
+            width=80,
         )
-        add_btn.pack(side=tk.LEFT)
+        add_btn.pack(side="left")
 
-        edit_btn = ttk.Button(
-            button_frame,
-            text="Edit",
-            command=self._on_edit
+        edit_btn = ctk.CTkButton(
+            btn_frame, text="Edit",
+            command=self._on_edit,
+            **theme.secondary_button_kwargs(),
+            width=80,
         )
-        edit_btn.pack(side=tk.LEFT, padx=(5, 0))
+        edit_btn.pack(side="left", padx=(theme.PAD_SM, 0))
 
-        remove_btn = ttk.Button(
-            button_frame,
-            text="Remove",
-            command=self._on_remove
+        remove_btn = ctk.CTkButton(
+            btn_frame, text="Remove",
+            command=self._on_remove,
+            **theme.danger_button_kwargs(),
+            width=80,
         )
-        remove_btn.pack(side=tk.LEFT, padx=(5, 0))
+        remove_btn.pack(side="left", padx=(theme.PAD_SM, 0))
 
-        close_btn = ttk.Button(
-            button_frame,
-            text="Close",
-            command=self._on_close
+        close_btn = ctk.CTkButton(
+            btn_frame, text="Close",
+            command=self._on_close,
+            **theme.secondary_button_kwargs(),
+            width=80,
         )
-        close_btn.pack(side=tk.RIGHT)
+        close_btn.pack(side="right")
 
-    def _on_double_click(self, event):
-        region = self.tree.identify_region(event.x, event.y)
-        if region == "cell":
-            self._on_edit()
+    def _refresh_list(self):
+        for card in self._cards:
+            card.destroy()
+        self._cards.clear()
+        self._selected_card = None
 
-    def _sort_by(self, column: str):
-        if self._sort_column == column:
-            self._sort_cycle = (self._sort_cycle + 1) % 3
+        keybinds = self._get_sorted_keybinds()
+
+        if not keybinds:
+            self.empty_label.pack(pady=40)
         else:
-            self._sort_column = column
-            self._sort_cycle = 0
+            self.empty_label.pack_forget()
+            for kb in keybinds:
+                action_display = self.ACTION_TYPE_DISPLAY.get(kb.action_type, kb.action_type)
+                card = _KeybindCard(
+                    self.list_frame,
+                    keybind=kb,
+                    action_label=action_display,
+                    on_select=self._on_card_select,
+                    on_double_click=self._on_card_dblclick,
+                )
+                card.pack(fill="x", pady=(0, theme.PAD_SM))
+                self._cards.append(card)
 
+    def _on_card_select(self, card: _KeybindCard):
+        if self._selected_card and self._selected_card is not card:
+            self._selected_card.set_selected(False)
+        card.set_selected(True)
+        self._selected_card = card
+
+    def _on_card_dblclick(self, card: _KeybindCard):
+        self._on_edit()
+
+    _SORT_MAP = {
+        "Created": None,
+        "Hotkey": "hotkey",
+        "Name": "name",
+        "Type": "type",
+    }
+
+    def _on_sort_changed(self, value: str):
+        col = self._SORT_MAP.get(value)
+        if col == self._sort_column:
+            self._sort_cycle = (self._sort_cycle + 1) % 2
+        else:
+            self._sort_column = col
+            self._sort_cycle = 0
         self._refresh_list()
 
     def _get_sorted_keybinds(self):
         keybinds = self.store.get_all()
 
-        if self._sort_column is None or self._sort_cycle == 2:
+        if self._sort_column is None:
             keybinds.sort(key=lambda kb: kb.created_at)
             return keybinds
 
@@ -179,53 +306,10 @@ class ConfigWindow:
         keybinds.sort(key=key_func, reverse=reverse)
         return keybinds
 
-    def _update_column_headers(self):
-        if self.tree is None:
-            return
-
-        for col in ('hotkey', 'name', 'type'):
-            header_text = self.COLUMN_HEADERS[col]
-
-            if self._sort_column == col and self._sort_cycle != 2:
-                if self._sort_cycle == 0:
-                    header_text += " \u25B2"
-                elif self._sort_cycle == 1:
-                    header_text += " \u25BC"
-
-            self.tree.heading(
-                col,
-                text=header_text,
-                command=lambda c=col: self._sort_by(c)
-            )
-
-    def _refresh_list(self):
-        if self.tree is None:
-            return
-
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
-        for kb in self._get_sorted_keybinds():
-            action_display = self.ACTION_TYPE_DISPLAY.get(kb.action_type, kb.action_type)
-            self.tree.insert(
-                '',
-                tk.END,
-                iid=kb.id,
-                values=(kb.hotkey, kb.name, action_display)
-            )
-
-        self._update_column_headers()
-
     def _get_selected_keybind(self) -> Optional[Keybind]:
-        if self.tree is None:
+        if self._selected_card is None:
             return None
-
-        selection = self.tree.selection()
-        if not selection:
-            return None
-
-        keybind_id = selection[0]
-        return self.store.get(keybind_id)
+        return self._selected_card.keybind
 
     def _on_add(self):
         from .keybind_editor import KeybindEditorDialog
@@ -233,7 +317,7 @@ class ConfigWindow:
         dialog = KeybindEditorDialog(
             self.root,
             self.store,
-            self.hotkey_manager
+            self.hotkey_manager,
         )
         result = dialog.show()
 
@@ -254,7 +338,7 @@ class ConfigWindow:
             self.root,
             self.store,
             self.hotkey_manager,
-            keybind=keybind
+            keybind=keybind,
         )
         result = dialog.show()
 
@@ -272,14 +356,12 @@ class ConfigWindow:
         confirm = messagebox.askyesno(
             "Remove Keybind",
             f"Are you sure you want to remove '{keybind.name}'?\n\n"
-            f"Hotkey: {keybind.hotkey}"
+            f"Hotkey: {keybind.hotkey}",
         )
 
         if confirm:
             self.hotkey_manager.unregister(keybind.hotkey)
-
             self.store.remove(keybind.id)
-
             self._refresh_list()
             if self.on_keybinds_changed:
                 self.on_keybinds_changed()

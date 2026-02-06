@@ -4,6 +4,8 @@ import threading
 import tkinter as tk
 from typing import Optional
 
+import customtkinter as ctk
+
 from .config import get_data_dir, get_icon_path, is_macos
 from .encryption import EncryptionManager
 from .storage import KeybindStore, Keybind
@@ -12,6 +14,7 @@ from .clipboard import ClipboardManager, ClipboardBackup
 from .launcher import Launcher
 from .tray import SystemTray
 from tkinter import messagebox as _messagebox
+from .gui.theme import configure_appearance
 from .gui.master_password import MasterPasswordDialog, WrongPasswordDialog
 from .gui.config_window import ConfigWindow
 
@@ -32,10 +35,12 @@ class QuickKeysApp:
         self._tk_root: Optional[tk.Tk] = None
 
     def run(self):
+        configure_appearance()
+
         if not self._authenticate_startup():
             return
 
-        self._tk_root = tk.Tk()
+        self._tk_root = ctk.CTk()
         self._tk_root.withdraw()
 
         icon_path = get_icon_path()
@@ -70,6 +75,11 @@ class QuickKeysApp:
         while True:
             dialog = MasterPasswordDialog(is_new_setup=is_new_setup)
             password = dialog.show()
+
+            if password == "__RESET_DATA__":
+                self._perform_data_reset()
+                is_new_setup = True  # Now treat as new setup
+                continue
 
             if password is None:
                 return False
@@ -212,6 +222,7 @@ class QuickKeysApp:
 
         if self.config_window is None:
             self.config_window = ConfigWindow(
+                self._tk_root,
                 self.store,
                 self.hotkeys,
                 on_keybinds_changed=self._on_keybinds_changed
@@ -269,3 +280,17 @@ class QuickKeysApp:
             self.tray.stop()
 
         self._is_unlocked = False
+
+    def _perform_data_reset(self):
+        store_file = self.data_dir / "keybinds.enc"
+        try:
+            if store_file.exists():
+                store_file.unlink()
+            print("Data reset complete. Starting fresh setup.")
+        except Exception as e:
+            print(f"Error deleting data file: {e}")
+            _messagebox.showerror(
+                "Reset Error",
+                f"Could not delete data file:\n{e}\n\n"
+                f"Please manually delete:\n{store_file}"
+            )

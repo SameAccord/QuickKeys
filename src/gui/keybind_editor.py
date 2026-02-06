@@ -1,20 +1,22 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import messagebox, filedialog
 from typing import Optional
+
+import customtkinter as ctk
 
 from ..storage import Keybind, KeybindStore
 from ..hotkeys import HotkeyManager, HotkeyCapture
-from ..config import get_icon_path
+from . import theme
 
 
 class KeybindEditorDialog:
 
     def __init__(
         self,
-        parent: tk.Toplevel,
+        parent: ctk.CTkToplevel,
         store: KeybindStore,
         hotkey_manager: HotkeyManager,
-        keybind: Optional[Keybind] = None
+        keybind: Optional[Keybind] = None,
     ):
         self.parent = parent
         self.store = store
@@ -23,7 +25,7 @@ class KeybindEditorDialog:
         self.is_edit = keybind is not None
         self.result = False
 
-        self.root: Optional[tk.Toplevel] = None
+        self.root: Optional[ctk.CTkToplevel] = None
         self.hotkey_capture: Optional[HotkeyCapture] = None
         self.is_capturing = False
 
@@ -32,7 +34,6 @@ class KeybindEditorDialog:
         self.action_type_var = tk.StringVar(value='paste')
         self.username_var = tk.StringVar()
         self.password_var = tk.StringVar()
-        self.custom_text_var = tk.StringVar()
         self.program_path_var = tk.StringVar()
         self.program_args_var = tk.StringVar()
         self.wait_seconds_var = tk.StringVar(value='2.0')
@@ -43,38 +44,35 @@ class KeybindEditorDialog:
             self.action_type_var.set(keybind.action_type)
             self.username_var.set(keybind.username)
             self.password_var.set(keybind.password)
-            self.custom_text_var.set(keybind.custom_text)
             self.program_path_var.set(keybind.program_path)
             self.program_args_var.set(keybind.program_args)
             self.wait_seconds_var.set(str(keybind.wait_seconds))
 
     def show(self) -> bool:
-        self.root = tk.Toplevel(self.parent)
+        self.root = ctk.CTkToplevel(self.parent)
         self.root.title("Edit Keybind" if self.is_edit else "Add Keybind")
-        self.root.geometry("450x500")
+        self.root.geometry("470x560")
         self.root.resizable(False, False)
         self.root.transient(self.parent)
         self.root.grab_set()
+        self.root.configure(fg_color=theme.BG_DARK)
 
-        icon_path = get_icon_path()
-        if icon_path:
-            try:
-                self.root.iconbitmap(str(icon_path))
-            except Exception:
-                pass
+        theme.set_window_icon(self.root)
 
         self.root.update_idletasks()
         px = self.parent.winfo_x()
         py = self.parent.winfo_y()
         pw = self.parent.winfo_width()
         ph = self.parent.winfo_height()
-        x = px + (pw - 450) // 2
-        y = py + (ph - 500) // 2
+        x = px + (pw - 470) // 2
+        y = py + (ph - 560) // 2
         self.root.geometry(f"+{x}+{y}")
 
         self._create_widgets()
+        self._on_action_type_changed(self.action_type_var.get())
 
-        self._on_action_type_changed()
+        if self.keybind and self.keybind.custom_text:
+            self.custom_text_box.insert("1.0", self.keybind.custom_text)
 
         self.root.protocol("WM_DELETE_WINDOW", self._on_cancel)
         self.root.wait_window()
@@ -82,177 +80,301 @@ class KeybindEditorDialog:
         return self.result
 
     def _create_widgets(self):
-        main_frame = ttk.Frame(self.root, padding=15)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        hotkey_frame = ttk.LabelFrame(main_frame, text="Hotkey", padding=10)
-        hotkey_frame.pack(fill=tk.X, pady=(0, 10))
-
-        hotkey_row = ttk.Frame(hotkey_frame)
-        hotkey_row.pack(fill=tk.X)
-
-        self.hotkey_entry = ttk.Entry(
-            hotkey_row,
-            textvariable=self.hotkey_var,
-            width=25,
-            state='readonly'
+        self.main_frame = ctk.CTkScrollableFrame(
+            self.root,
+            fg_color=theme.BG_DARK,
+            scrollbar_button_color=theme.SURFACE,
+            scrollbar_button_hover_color=theme.SURFACE_HOVER,
         )
-        self.hotkey_entry.pack(side=tk.LEFT)
+        self.main_frame.pack(fill="both", expand=True, padx=theme.PAD, pady=(theme.PAD, 0))
 
-        self.capture_btn = ttk.Button(
-            hotkey_row,
+        self._section_label(self.main_frame, "Hotkey")
+
+        hotkey_card = ctk.CTkFrame(self.main_frame, fg_color=theme.SURFACE, corner_radius=theme.CORNER_RADIUS)
+        hotkey_card.pack(fill="x", pady=(0, theme.PAD_SM))
+
+        hotkey_inner = ctk.CTkFrame(hotkey_card, fg_color="transparent")
+        hotkey_inner.pack(fill="x", padx=theme.PAD_SM, pady=theme.PAD_SM)
+
+        self.hotkey_entry = ctk.CTkEntry(
+            hotkey_inner,
+            textvariable=self.hotkey_var,
+            width=200,
+            state='readonly',
+            **theme.entry_kwargs(),
+        )
+        self.hotkey_entry.pack(side="left")
+
+        self.capture_btn = ctk.CTkButton(
+            hotkey_inner,
             text="Capture",
             command=self._toggle_capture,
-            width=10
+            width=100,
+            **theme.accent_button_kwargs(),
         )
-        self.capture_btn.pack(side=tk.LEFT, padx=(10, 0))
+        self.capture_btn.pack(side="left", padx=(theme.PAD_SM, 0))
 
-        ttk.Label(
-            hotkey_frame,
+        ctk.CTkLabel(
+            hotkey_card,
             text="Click Capture, then press your desired key combination",
-            foreground='gray',
-            font=('Segoe UI', 8)
-        ).pack(anchor=tk.W, pady=(5, 0))
+            font=theme.FONT_TINY,
+            text_color=theme.TEXT_MUTED,
+        ).pack(anchor="w", padx=theme.PAD_SM, pady=(0, theme.PAD_SM))
 
-        name_frame = ttk.Frame(main_frame)
-        name_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ttk.Label(name_frame, text="Name:").pack(anchor=tk.W)
-        ttk.Entry(
-            name_frame,
+        self._section_label(self.main_frame, "Name")
+        self.name_entry = ctk.CTkEntry(
+            self.main_frame,
             textvariable=self.name_var,
-            width=50
-        ).pack(fill=tk.X, pady=(2, 0))
+            **theme.entry_kwargs(),
+        )
+        self.name_entry.pack(fill="x", pady=(0, theme.PAD_SM))
 
-        action_frame = ttk.Frame(main_frame)
-        action_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ttk.Label(action_frame, text="Action Type:").pack(anchor=tk.W)
-
-        action_combo = ttk.Combobox(
-            action_frame,
-            textvariable=self.action_type_var,
+        self._section_label(self.main_frame, "Action Type")
+        self.action_combo = ctk.CTkOptionMenu(
+            self.main_frame,
+            variable=self.action_type_var,
             values=['paste', 'launch', 'launch_paste'],
-            state='readonly',
-            width=20
+            command=self._on_action_type_changed,
+            width=180,
+            height=theme.ENTRY_HEIGHT,
+            font=theme.FONT_BODY,
+            fg_color=theme.SURFACE,
+            button_color=theme.ACCENT,
+            button_hover_color=theme.ACCENT_HOVER,
+            dropdown_fg_color=theme.SURFACE,
+            dropdown_hover_color=theme.SURFACE_HOVER,
+            dropdown_text_color=theme.TEXT_PRIMARY,
+            text_color=theme.TEXT_PRIMARY,
+            corner_radius=theme.BUTTON_RADIUS,
         )
-        action_combo.pack(anchor=tk.W, pady=(2, 0))
-        action_combo.bind('<<ComboboxSelected>>', lambda e: self._on_action_type_changed())
+        self.action_combo.pack(anchor="w", pady=(0, theme.PAD_SM))
 
-        self.paste_frame = ttk.LabelFrame(main_frame, text="Paste Settings", padding=10)
-        self.paste_frame.pack(fill=tk.X, pady=(0, 10))
+        self.paste_section = ctk.CTkFrame(self.main_frame, fg_color="transparent")
 
-        ttk.Label(self.paste_frame, text="Username:").pack(anchor=tk.W)
-        ttk.Entry(
-            self.paste_frame,
-            textvariable=self.username_var,
-            width=50
-        ).pack(fill=tk.X, pady=(2, 5))
+        self._section_label(self.paste_section, "Paste Settings")
 
-        ttk.Label(self.paste_frame, text="Password:").pack(anchor=tk.W)
+        paste_card = ctk.CTkFrame(self.paste_section, fg_color=theme.SURFACE, corner_radius=theme.CORNER_RADIUS)
+        paste_card.pack(fill="x", pady=(0, theme.PAD_SM))
+        paste_inner = ctk.CTkFrame(paste_card, fg_color="transparent")
+        paste_inner.pack(fill="x", padx=theme.PAD_SM, pady=theme.PAD_SM)
 
-        password_row = ttk.Frame(self.paste_frame)
-        password_row.pack(fill=tk.X, pady=(2, 5))
+        ctk.CTkLabel(paste_inner, text="Username", font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY).pack(anchor="w")
+        ctk.CTkEntry(
+            paste_inner, textvariable=self.username_var, **theme.entry_kwargs(),
+        ).pack(fill="x", pady=(2, theme.PAD_SM))
 
-        self.password_entry = ttk.Entry(
-            password_row,
-            textvariable=self.password_var,
-            show="*",
-            width=45
+        ctk.CTkLabel(paste_inner, text="Password", font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY).pack(anchor="w")
+
+        pw_row = ctk.CTkFrame(paste_inner, fg_color="transparent")
+        pw_row.pack(fill="x", pady=(2, theme.PAD_SM))
+
+        self.password_entry = ctk.CTkEntry(
+            pw_row, textvariable=self.password_var, show="*",
+            **theme.entry_kwargs(),
         )
-        self.password_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.password_entry.pack(side="left", fill="x", expand=True)
 
-        eye_btn = tk.Button(
-            password_row,
-            text="\U0001F441",
-            font=('Segoe UI', 10),
-            width=3,
-            relief=tk.FLAT,
-            cursor="hand2"
+        generate_btn = ctk.CTkButton(
+            pw_row, text="Generate",
+            command=self._open_password_generator,
+            width=80,
+            **theme.secondary_button_kwargs(),
         )
-        eye_btn.pack(side=tk.LEFT, padx=(5, 0))
-        eye_btn.bind('<ButtonPress-1>', lambda e: self.password_entry.config(show=""))
-        eye_btn.bind('<ButtonRelease-1>', lambda e: self.password_entry.config(show="*"))
+        generate_btn.pack(side="left", padx=(theme.PAD_SM, 0))
 
-        ttk.Label(
-            self.paste_frame,
-            text="Or Custom Text (instead of username/password):"
-        ).pack(anchor=tk.W, pady=(10, 0))
-        ttk.Entry(
-            self.paste_frame,
-            textvariable=self.custom_text_var,
-            width=50
-        ).pack(fill=tk.X, pady=(2, 0))
+        self._pw_visible = False
+        self.eye_btn = ctk.CTkButton(
+            pw_row, text="\U0001F441", width=40,
+            fg_color=theme.SURFACE_HOVER,
+            hover_color=theme.SURFACE_SELECT,
+            text_color=theme.TEXT_SECONDARY,
+            corner_radius=theme.BUTTON_RADIUS,
+            height=theme.ENTRY_HEIGHT,
+            font=theme.FONT_BODY,
+            command=self._toggle_password_visibility,
+        )
+        self.eye_btn.pack(side="left", padx=(theme.PAD_SM, 0))
 
-        self.launch_frame = ttk.LabelFrame(main_frame, text="Launch Settings", padding=10)
-        self.launch_frame.pack(fill=tk.X, pady=(0, 10))
+        ctk.CTkLabel(
+            paste_inner,
+            text="Or Custom Text (instead of username/password):",
+            font=theme.FONT_SMALL,
+            text_color=theme.TEXT_SECONDARY,
+        ).pack(anchor="w", pady=(theme.PAD_SM, 0))
 
-        ttk.Label(self.launch_frame, text="Program Path:").pack(anchor=tk.W)
+        self.custom_text_box = ctk.CTkTextbox(
+            paste_inner,
+            height=70,
+            fg_color=theme.INPUT_BG,
+            border_color=theme.BORDER,
+            text_color=theme.TEXT_PRIMARY,
+            corner_radius=theme.BUTTON_RADIUS,
+            font=theme.FONT_BODY,
+            wrap="word",
+        )
+        self.custom_text_box.pack(fill="x", pady=(2, theme.PAD_SM))
 
-        path_row = ttk.Frame(self.launch_frame)
-        path_row.pack(fill=tk.X, pady=(2, 5))
+        self._custom_text_actual = ""
+        self._custom_text_visible = True
 
-        ttk.Entry(
-            path_row,
-            textvariable=self.program_path_var,
-            width=40
-        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        custom_btn_row = ctk.CTkFrame(paste_inner, fg_color="transparent")
+        custom_btn_row.pack(fill="x", pady=(0, 0), anchor="e")
 
-        ttk.Button(
-            path_row,
-            text="Browse...",
-            command=self._browse_program
-        ).pack(side=tk.LEFT, padx=(5, 0))
+        custom_generate_btn = ctk.CTkButton(
+            custom_btn_row, text="Generate",
+            command=self._open_custom_text_generator,
+            width=80,
+            **theme.secondary_button_kwargs(),
+        )
+        custom_generate_btn.pack(side="right", padx=(theme.PAD_SM, 0))
 
-        ttk.Label(self.launch_frame, text="Arguments (optional):").pack(anchor=tk.W)
-        ttk.Entry(
-            self.launch_frame,
-            textvariable=self.program_args_var,
-            width=50
-        ).pack(fill=tk.X, pady=(2, 5))
+        self.custom_eye_btn = ctk.CTkButton(
+            custom_btn_row, text="\U0001F441", width=40,
+            fg_color=theme.SURFACE_HOVER,
+            hover_color=theme.SURFACE_SELECT,
+            text_color=theme.TEXT_SECONDARY,
+            corner_radius=theme.BUTTON_RADIUS,
+            height=theme.BUTTON_HEIGHT,
+            font=theme.FONT_BODY,
+            command=self._toggle_custom_text_visibility,
+        )
+        self.custom_eye_btn.pack(side="right")
 
-        self.wait_frame = ttk.Frame(self.launch_frame)
-        self.wait_frame.pack(fill=tk.X, pady=(5, 0))
+        self.launch_section = ctk.CTkFrame(self.main_frame, fg_color="transparent")
 
-        ttk.Label(self.wait_frame, text="Wait before paste (seconds):").pack(side=tk.LEFT)
-        ttk.Entry(
-            self.wait_frame,
-            textvariable=self.wait_seconds_var,
-            width=10
-        ).pack(side=tk.LEFT, padx=(5, 0))
+        self._section_label(self.launch_section, "Launch Settings")
 
-        button_frame = ttk.Frame(main_frame)
-        button_frame.pack(fill=tk.X, pady=(10, 0))
+        launch_card = ctk.CTkFrame(self.launch_section, fg_color=theme.SURFACE, corner_radius=theme.CORNER_RADIUS)
+        launch_card.pack(fill="x", pady=(0, theme.PAD_SM))
+        launch_inner = ctk.CTkFrame(launch_card, fg_color="transparent")
+        launch_inner.pack(fill="x", padx=theme.PAD_SM, pady=theme.PAD_SM)
 
-        ttk.Button(
-            button_frame,
-            text="Cancel",
-            command=self._on_cancel
-        ).pack(side=tk.RIGHT)
+        ctk.CTkLabel(launch_inner, text="Program Path", font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY).pack(anchor="w")
 
-        ttk.Button(
-            button_frame,
-            text="Save",
-            command=self._on_save
-        ).pack(side=tk.RIGHT, padx=(0, 5))
+        path_row = ctk.CTkFrame(launch_inner, fg_color="transparent")
+        path_row.pack(fill="x", pady=(2, theme.PAD_SM))
 
-    def _on_action_type_changed(self):
+        ctk.CTkEntry(
+            path_row, textvariable=self.program_path_var, **theme.entry_kwargs(),
+        ).pack(side="left", fill="x", expand=True)
+
+        ctk.CTkButton(
+            path_row, text="Browse",
+            command=self._browse_program,
+            width=80,
+            **theme.secondary_button_kwargs(),
+        ).pack(side="left", padx=(theme.PAD_SM, 0))
+
+        ctk.CTkLabel(launch_inner, text="Arguments (optional)", font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY).pack(anchor="w")
+        ctk.CTkEntry(
+            launch_inner, textvariable=self.program_args_var, **theme.entry_kwargs(),
+        ).pack(fill="x", pady=(2, 0))
+
+        self.wait_section = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+
+        wait_inner = ctk.CTkFrame(self.wait_section, fg_color="transparent")
+        wait_inner.pack(fill="x")
+
+        ctk.CTkLabel(wait_inner, text="Wait before paste (seconds):", font=theme.FONT_SMALL, text_color=theme.TEXT_SECONDARY).pack(side="left")
+        ctk.CTkEntry(
+            wait_inner, textvariable=self.wait_seconds_var, width=80,
+            **theme.entry_kwargs(),
+        ).pack(side="left", padx=(theme.PAD_SM, 0))
+
+        btn_frame = ctk.CTkFrame(self.root, fg_color=theme.BG_DARK)
+        btn_frame.pack(fill="x", padx=theme.PAD, pady=theme.PAD)
+
+        save_btn = ctk.CTkButton(
+            btn_frame, text="Save",
+            command=self._on_save,
+            **theme.accent_button_kwargs(),
+            width=90,
+        )
+        save_btn.pack(side="right")
+
+        cancel_btn = ctk.CTkButton(
+            btn_frame, text="Cancel",
+            command=self._on_cancel,
+            **theme.secondary_button_kwargs(),
+            width=90,
+        )
+        cancel_btn.pack(side="right", padx=(0, theme.PAD_SM))
+
+    @staticmethod
+    def _section_label(parent, text: str):
+        ctk.CTkLabel(
+            parent,
+            text=text,
+            font=theme.FONT_SMALL,
+            text_color=theme.TEXT_SECONDARY,
+        ).pack(anchor="w", pady=(theme.PAD_SM, 4))
+
+    def _toggle_password_visibility(self):
+        self._pw_visible = not self._pw_visible
+        self.password_entry.configure(show="" if self._pw_visible else "*")
+
+    def _open_password_generator(self):
+        from .password_generator import PasswordGeneratorDialog
+
+        dialog = PasswordGeneratorDialog(parent=self.root)
+        password = dialog.show()
+
+        if password:
+            self.password_var.set(password)
+            if not self._pw_visible:
+                self._pw_visible = True
+                self.password_entry.configure(show="")
+
+    def _toggle_custom_text_visibility(self):
+        if self._custom_text_visible:
+            self._custom_text_actual = self.custom_text_box.get("1.0", "end-1c")
+            self.custom_text_box.delete("1.0", "end")
+            self.custom_text_box.insert("1.0", "*" * len(self._custom_text_actual))
+            self._custom_text_visible = False
+        else:
+            self.custom_text_box.delete("1.0", "end")
+            self.custom_text_box.insert("1.0", self._custom_text_actual)
+            self._custom_text_visible = True
+
+    def _open_custom_text_generator(self):
+        from .password_generator import PasswordGeneratorDialog
+
+        dialog = PasswordGeneratorDialog(parent=self.root)
+        password = dialog.show()
+
+        if password:
+            if not self._custom_text_visible:
+                self._custom_text_visible = True
+
+            try:
+                self.custom_text_box.delete("sel.first", "sel.last")
+            except tk.TclError:
+                pass
+            self.custom_text_box.insert("insert", password)
+
+    def _get_custom_text(self) -> str:
+        if self._custom_text_visible:
+            return self.custom_text_box.get("1.0", "end-1c")
+        else:
+            return self._custom_text_actual
+
+    def _on_action_type_changed(self, value: str = None):
         action = self.action_type_var.get()
 
         if action in ('paste', 'launch_paste'):
-            self.paste_frame.pack(fill=tk.X, pady=(0, 10))
+            self.paste_section.pack(fill="x", after=self.action_combo)
         else:
-            self.paste_frame.pack_forget()
+            self.paste_section.pack_forget()
 
         if action in ('launch', 'launch_paste'):
-            self.launch_frame.pack(fill=tk.X, pady=(0, 10))
+            self.launch_section.pack(fill="x", after=self.paste_section if self.paste_section.winfo_ismapped() else self.action_combo)
         else:
-            self.launch_frame.pack_forget()
+            self.launch_section.pack_forget()
 
         if action == 'launch_paste':
-            self.wait_frame.pack(fill=tk.X, pady=(5, 0))
+            self.wait_section.pack(fill="x", after=self.launch_section, pady=(0, theme.PAD_SM))
         else:
-            self.wait_frame.pack_forget()
+            self.wait_section.pack_forget()
 
     def _toggle_capture(self):
         if self.is_capturing:
@@ -262,7 +384,7 @@ class KeybindEditorDialog:
 
     def _start_capture(self):
         self.is_capturing = True
-        self.capture_btn.config(text="Press keys...")
+        self.capture_btn.configure(text="Press keys...")
         self.hotkey_var.set("Waiting...")
 
         self.hotkey_capture = HotkeyCapture(self._on_hotkey_captured)
@@ -270,7 +392,7 @@ class KeybindEditorDialog:
 
     def _stop_capture(self):
         self.is_capturing = False
-        self.capture_btn.config(text="Capture")
+        self.capture_btn.configure(text="Capture")
 
         if self.hotkey_capture:
             self.hotkey_capture.stop()
@@ -279,7 +401,7 @@ class KeybindEditorDialog:
     def _on_hotkey_captured(self, hotkey: str):
         self.hotkey_var.set(hotkey)
         self.is_capturing = False
-        self.capture_btn.config(text="Capture")
+        self.capture_btn.configure(text="Capture")
 
     def _browse_program(self):
         import platform
@@ -288,18 +410,18 @@ class KeybindEditorDialog:
         if platform.system() == "Windows":
             filetypes = [
                 ("Executables", "*.exe;*.bat;*.cmd"),
-                ("All files", "*.*")
+                ("All files", "*.*"),
             ]
         elif platform.system() == "Darwin":
             filetypes = [
                 ("Applications", "*.app"),
-                ("All files", "*.*")
+                ("All files", "*.*"),
             ]
 
         path = filedialog.askopenfilename(
             parent=self.root,
             title="Select Program",
-            filetypes=filetypes
+            filetypes=filetypes,
         )
 
         if path:
@@ -315,7 +437,7 @@ class KeybindEditorDialog:
         if self.store.hotkey_exists(hotkey, exclude_id):
             messagebox.showerror(
                 "Validation Error",
-                f"The hotkey '{hotkey}' is already in use."
+                f"The hotkey '{hotkey}' is already in use.",
             )
             return False
 
@@ -330,12 +452,12 @@ class KeybindEditorDialog:
                 self.username_var.get().strip() or
                 self.password_var.get().strip()
             )
-            has_custom = self.custom_text_var.get().strip()
+            has_custom = self._get_custom_text().strip()
 
             if not has_credentials and not has_custom:
                 messagebox.showerror(
                     "Validation Error",
-                    "Please enter username/password or custom text."
+                    "Please enter username/password or custom text.",
                 )
                 return False
 
@@ -343,7 +465,7 @@ class KeybindEditorDialog:
             if not self.program_path_var.get().strip():
                 messagebox.showerror(
                     "Validation Error",
-                    "Please select a program to launch."
+                    "Please select a program to launch.",
                 )
                 return False
 
@@ -355,7 +477,7 @@ class KeybindEditorDialog:
                 except ValueError:
                     messagebox.showerror(
                         "Validation Error",
-                        "Wait seconds must be a positive number."
+                        "Wait seconds must be a positive number.",
                     )
                     return False
 
@@ -382,7 +504,7 @@ class KeybindEditorDialog:
             self.keybind.action_type = self.action_type_var.get()
             self.keybind.username = self.username_var.get()
             self.keybind.password = self.password_var.get()
-            self.keybind.custom_text = self.custom_text_var.get()
+            self.keybind.custom_text = self._get_custom_text()
             self.keybind.program_path = self.program_path_var.get()
             self.keybind.program_args = self.program_args_var.get()
             self.keybind.wait_seconds = wait_seconds
@@ -398,10 +520,10 @@ class KeybindEditorDialog:
                 action_type=self.action_type_var.get(),
                 username=self.username_var.get(),
                 password=self.password_var.get(),
-                custom_text=self.custom_text_var.get(),
+                custom_text=self._get_custom_text(),
                 program_path=self.program_path_var.get(),
                 program_args=self.program_args_var.get(),
-                wait_seconds=wait_seconds
+                wait_seconds=wait_seconds,
             )
             self.store.add(keybind)
 
